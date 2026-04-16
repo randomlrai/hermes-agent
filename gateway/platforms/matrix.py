@@ -577,9 +577,6 @@ class MatrixAdapter(BasePlatformAdapter):
         client.add_event_handler(EventType.REACTION, self._on_reaction)
         client.add_event_handler(IntEvt.INVITE, self._on_invite)
 
-        if self._encryption and getattr(client, "crypto", None):
-            client.add_event_handler(EventType.ROOM_ENCRYPTED, self._on_encrypted_event)
-
         # Initial sync to catch up, then start background sync.
         self._startup_ts = time.time()
         self._closing = False
@@ -1129,14 +1126,6 @@ class MatrixAdapter(BasePlatformAdapter):
                 getattr(event, "event_id", "?"),
             )
 
-            # Route to the appropriate handler.
-            # Remove from dedup set so _on_room_message doesn't drop it
-            # (the encrypted event ID was already registered by _on_encrypted_event).
-            decrypted_id = str(
-                getattr(decrypted, "event_id", getattr(event, "event_id", ""))
-            )
-            if decrypted_id:
-                self._processed_events_set.discard(decrypted_id)
             try:
                 await self._on_room_message(decrypted)
             except Exception as exc:
@@ -1527,24 +1516,6 @@ class MatrixAdapter(BasePlatformAdapter):
         )
 
         await self.handle_message(msg_event)
-
-    async def _on_encrypted_event(self, event: Any) -> None:
-        """Handle encrypted events that could not be auto-decrypted."""
-        room_id = str(getattr(event, "room_id", ""))
-        event_id = str(getattr(event, "event_id", ""))
-
-        if self._is_duplicate_event(event_id):
-            return
-
-        logger.warning(
-            "Matrix: could not decrypt event %s in %s — buffering for retry",
-            event_id,
-            room_id,
-        )
-
-        self._pending_megolm.append((room_id, event, time.time()))
-        if len(self._pending_megolm) > _MAX_PENDING_EVENTS:
-            self._pending_megolm = self._pending_megolm[-_MAX_PENDING_EVENTS:]
 
     async def _on_invite(self, event: Any) -> None:
         """Auto-join rooms when invited."""

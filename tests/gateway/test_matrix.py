@@ -1179,45 +1179,7 @@ class TestJoinedRoomsReference:
 # ---------------------------------------------------------------------------
 
 class TestMatrixMegolmEventHandling:
-    @pytest.mark.asyncio
-    async def test_encrypted_event_buffers_for_retry(self):
-        """_on_encrypted_event should buffer undecrypted events for retry."""
-        adapter = _make_adapter()
-        adapter._user_id = "@bot:example.org"
-        adapter._startup_ts = 0.0
-        adapter._dm_rooms = {}
-
-        fake_event = MagicMock()
-        fake_event.room_id = "!room:example.org"
-        fake_event.event_id = "$encrypted_event"
-        fake_event.sender = "@alice:example.org"
-
-        await adapter._on_encrypted_event(fake_event)
-
-        # Should have buffered the event
-        assert len(adapter._pending_megolm) == 1
-        room_id, event, ts = adapter._pending_megolm[0]
-        assert room_id == "!room:example.org"
-        assert event is fake_event
-
-    @pytest.mark.asyncio
-    async def test_encrypted_event_buffer_capped(self):
-        """Buffer should not grow past _MAX_PENDING_EVENTS."""
-        adapter = _make_adapter()
-        adapter._user_id = "@bot:example.org"
-        adapter._startup_ts = 0.0
-        adapter._dm_rooms = {}
-
-        from gateway.platforms.matrix import _MAX_PENDING_EVENTS
-
-        for i in range(_MAX_PENDING_EVENTS + 10):
-            evt = MagicMock()
-            evt.room_id = "!room:example.org"
-            evt.event_id = f"$event_{i}"
-            evt.sender = "@alice:example.org"
-            await adapter._on_encrypted_event(evt)
-
-        assert len(adapter._pending_megolm) == _MAX_PENDING_EVENTS
+    pass  # _on_encrypted_event removed — DecryptionDispatcher handles decryption
 
 
 # ---------------------------------------------------------------------------
@@ -1364,8 +1326,8 @@ class TestMatrixEncryptedEventHandler:
         handler_calls = mock_client.add_event_handler.call_args_list
         registered_types = [call.args[0] for call in handler_calls]
 
-        # Should have registered handlers for ROOM_MESSAGE, REACTION, INVITE, and ROOM_ENCRYPTED
-        assert len(handler_calls) >= 4  # At minimum these four
+        # Should have registered handlers for ROOM_MESSAGE, REACTION, INVITE
+        assert len(handler_calls) >= 3
 
         await adapter.disconnect()
 
