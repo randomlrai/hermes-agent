@@ -1154,6 +1154,27 @@ class TestMatrixEncryptedSendFallback:
 
 
 # ---------------------------------------------------------------------------
+# E2EE: _joined_rooms reference preservation for CryptoStateStore
+# ---------------------------------------------------------------------------
+
+class TestJoinedRoomsReference:
+    def test_joined_rooms_reference_preserved_after_reassignment(self):
+        """_CryptoStateStore must see updates after initial sync populates rooms."""
+        from gateway.platforms.matrix import _CryptoStateStore
+
+        joined = set()
+        store = _CryptoStateStore(MagicMock(), joined)
+
+        # Simulate what connect() should do: mutate in place, not reassign.
+        joined.clear()
+        joined.update(["!room1:example.org", "!room2:example.org"])
+
+        import asyncio
+        rooms = asyncio.get_event_loop().run_until_complete(store.find_shared_rooms("@user:ex"))
+        assert set(rooms) == {"!room1:example.org", "!room2:example.org"}
+
+
+# ---------------------------------------------------------------------------
 # E2EE: MegolmEvent key request + buffering via _on_encrypted_event
 # ---------------------------------------------------------------------------
 

@@ -588,7 +588,8 @@ class MatrixAdapter(BasePlatformAdapter):
             sync_data = await client.sync(timeout=10000, full_state=True)
             if isinstance(sync_data, dict):
                 rooms_join = sync_data.get("rooms", {}).get("join", {})
-                self._joined_rooms = set(rooms_join.keys())
+                self._joined_rooms.clear()
+                self._joined_rooms.update(rooms_join.keys())
                 # Store the next_batch token so incremental syncs start
                 # from where the initial sync left off.
                 nb = sync_data.get("next_batch")
