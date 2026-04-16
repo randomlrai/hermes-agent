@@ -114,10 +114,6 @@ _CRYPTO_DB_PATH = _STORE_DIR / "crypto.db"
 # Grace period: ignore messages older than this many seconds before startup.
 _STARTUP_GRACE_SECONDS = 5
 
-# Pending undecrypted events: cap and TTL for retry buffer.
-_MAX_PENDING_EVENTS = 100
-_PENDING_EVENT_TTL = 300  # seconds — stop retrying after 5 min
-
 
 _E2EE_INSTALL_HINT = (
     "Install with: pip install 'mautrix[encryption]'  (requires libolm C library)"
@@ -247,7 +243,6 @@ class MatrixAdapter(BasePlatformAdapter):
 
         # Buffer for undecrypted events pending key receipt.
         # Each entry: (room_id, event, timestamp)
-        self._pending_megolm: list = []
 
         # Thread participation tracking (for require_mention bypass)
         self._threads = ThreadParticipationTracker("matrix")
@@ -303,6 +298,38 @@ class MatrixAdapter(BasePlatformAdapter):
     # E2EE helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _extract_server_ed25519(device_keys_obj: Any) -> Optional[str]:
+        """Extract the ed25519 identity key from a DeviceKeys object."""
+        for kid, kval in (getattr(device_keys_obj, "keys", {}) or {}).items():
+            if str(kid).startswith("ed25519:"):
+                return str(kval)
+        return None
+
+    async def _reverify_keys_after_upload(
+        self, client: Any, local_ed25519: str
+    ) -> bool:
+        """Re-query the server after share_keys() and verify our ed25519 key matches."""
+        try:
+            resp = await client.query_keys({client.mxid: [client.device_id]})
+            dk = getattr(resp, "device_keys", {}) or {}
+            ud = dk.get(str(client.mxid)) or {}
+            dev = ud.get(str(client.device_id))
+            if dev:
+                server_ed = self._extract_server_ed25519(dev)
+                if server_ed != local_ed25519:
+                    logger.error(
+                        "Matrix: device %s has immutable identity keys that "
+                        "don't match this installation. Generate a new access "
+                        "token with a fresh device.",
+                        client.device_id,
+                    )
+                    return False
+        except Exception as exc:
+            logger.error("Matrix: post-upload key verification failed: %s", exc)
+            return False
+        return True
+
     async def _verify_device_keys_on_server(self, client: Any, olm: Any) -> bool:
         """Verify our device keys are on the homeserver after loading crypto state.
 
@@ -318,8 +345,6 @@ class MatrixAdapter(BasePlatformAdapter):
             )
             return False
 
-        # query_keys returns typed objects (QueryKeysResponse, DeviceKeys
-        # with KeyID keys).  Normalise to plain strings for comparison.
         device_keys_map = getattr(resp, "device_keys", {}) or {}
         our_user_devices = device_keys_map.get(str(client.mxid)) or {}
         our_keys = our_user_devices.get(str(client.device_id))
@@ -333,44 +358,12 @@ class MatrixAdapter(BasePlatformAdapter):
             except Exception as exc:
                 logger.error("Matrix: failed to re-upload device keys: %s", exc)
                 return False
-            # Re-verify: server may accept OTKs but silently ignore device
-            # keys when identity keys are immutable for the existing device.
-            try:
-                resp2 = await client.query_keys({client.mxid: [client.device_id]})
-                dk2 = getattr(resp2, "device_keys", {}) or {}
-                ud2 = dk2.get(str(client.mxid)) or {}
-                k2 = ud2.get(str(client.device_id))
-                if k2:
-                    server_ed2 = None
-                    for kid, kval in (getattr(k2, "keys", {}) or {}).items():
-                        if str(kid).startswith("ed25519:"):
-                            server_ed2 = str(kval)
-                            break
-                    if server_ed2 != local_ed25519:
-                        logger.error(
-                            "Matrix: device %s has immutable identity keys that "
-                            "don't match this installation. Generate a new access "
-                            "token with a fresh device.",
-                            client.device_id,
-                        )
-                        return False
-            except Exception as exc:
-                logger.error("Matrix: post-upload key verification failed: %s", exc)
-                return False
-            return True
+            return await self._reverify_keys_after_upload(client, local_ed25519)
 
-        # DeviceKeys.keys is a dict[KeyID, str].  Iterate to find the
-        # ed25519 key rather than constructing a KeyID for lookup.
-        server_ed25519 = None
-        keys_dict = getattr(our_keys, "keys", {}) or {}
-        for key_id, key_value in keys_dict.items():
-            if str(key_id).startswith("ed25519:"):
-                server_ed25519 = str(key_value)
-                break
+        server_ed25519 = self._extract_server_ed25519(our_keys)
 
         if server_ed25519 != local_ed25519:
             if olm.account.shared:
-                # Restored account from DB but server has different keys — corrupted state.
                 logger.error(
                     "Matrix: server has different identity keys for device %s — "
                     "local crypto state is stale. Delete %s and restart.",
@@ -379,8 +372,6 @@ class MatrixAdapter(BasePlatformAdapter):
                 )
                 return False
 
-            # Fresh account (never uploaded). Server has stale keys from a
-            # previous installation. Try to delete the old device and re-upload.
             logger.warning(
                 "Matrix: server has stale keys for device %s — attempting re-upload",
                 client.device_id,
@@ -396,8 +387,6 @@ class MatrixAdapter(BasePlatformAdapter):
                     "Matrix: deleted stale device %s from server", client.device_id
                 )
             except Exception:
-                # Device deletion often requires UIA or may simply not be
-                # permitted — that's fine, share_keys will try to overwrite.
                 pass
             try:
                 await olm.share_keys()
@@ -409,29 +398,7 @@ class MatrixAdapter(BasePlatformAdapter):
                     exc,
                 )
                 return False
-            # Re-verify after stale-key re-upload.
-            try:
-                resp2 = await client.query_keys({client.mxid: [client.device_id]})
-                dk2 = getattr(resp2, "device_keys", {}) or {}
-                ud2 = dk2.get(str(client.mxid)) or {}
-                k2 = ud2.get(str(client.device_id))
-                if k2:
-                    server_ed2 = None
-                    for kid, kval in (getattr(k2, "keys", {}) or {}).items():
-                        if str(kid).startswith("ed25519:"):
-                            server_ed2 = str(kval)
-                            break
-                    if server_ed2 != local_ed25519:
-                        logger.error(
-                            "Matrix: device %s has immutable identity keys that "
-                            "don't match this installation. Generate a new access "
-                            "token with a fresh device.",
-                            client.device_id,
-                        )
-                        return False
-            except Exception as exc:
-                logger.error("Matrix: post-upload key verification failed: %s", exc)
-                return False
+            return await self._reverify_keys_after_upload(client, local_ed25519)
 
         return True
 
@@ -646,9 +613,7 @@ class MatrixAdapter(BasePlatformAdapter):
         from mautrix.client import InternalEventType as IntEvt
         from mautrix.client.dispatcher import MembershipEventDispatcher
 
-        # MembershipEventDispatcher converts raw ROOM_MEMBER state events
-        # into InternalEventType.INVITE / JOIN / LEAVE.  Without it the
-        # INVITE handler below never fires and the bot cannot auto-join.
+        # Without this the INVITE handler below never fires.
         client.add_dispatcher(MembershipEventDispatcher)
 
         client.add_event_handler(EventType.ROOM_MESSAGE, self._on_room_message)
@@ -1175,10 +1140,6 @@ class MatrixAdapter(BasePlatformAdapter):
                     except Exception as exc:
                         logger.warning("Matrix: sync event dispatch error: %s", exc)
 
-                # Retry any buffered undecrypted events.
-                if self._pending_megolm:
-                    await self._retry_pending_decryptions()
-
             except asyncio.CancelledError:
                 return
             except Exception as exc:
@@ -1198,54 +1159,6 @@ class MatrixAdapter(BasePlatformAdapter):
                     return
                 logger.warning("Matrix: sync error: %s — retrying in 5s", exc)
                 await asyncio.sleep(5)
-
-    async def _retry_pending_decryptions(self) -> None:
-        """Retry decrypting buffered encrypted events after new keys arrive."""
-        client = self._client
-        if not client or not self._pending_megolm:
-            return
-        crypto = getattr(client, "crypto", None)
-        if not crypto:
-            return
-
-        now = time.time()
-        still_pending: list = []
-
-        for room_id, event, ts in self._pending_megolm:
-            # Drop events that have aged past the TTL.
-            if now - ts > _PENDING_EVENT_TTL:
-                logger.debug(
-                    "Matrix: dropping expired pending event %s (age %.0fs)",
-                    getattr(event, "event_id", "?"),
-                    now - ts,
-                )
-                continue
-
-            try:
-                decrypted = await crypto.decrypt_megolm_event(event)
-            except Exception:
-                still_pending.append((room_id, event, ts))
-                continue
-
-            if decrypted is None or decrypted is event:
-                still_pending.append((room_id, event, ts))
-                continue
-
-            logger.info(
-                "Matrix: decrypted buffered event %s",
-                getattr(event, "event_id", "?"),
-            )
-
-            try:
-                await self._on_room_message(decrypted)
-            except Exception as exc:
-                logger.warning(
-                    "Matrix: error processing decrypted event %s: %s",
-                    getattr(event, "event_id", "?"),
-                    exc,
-                )
-
-        self._pending_megolm = still_pending
 
     # ------------------------------------------------------------------
     # Event callbacks

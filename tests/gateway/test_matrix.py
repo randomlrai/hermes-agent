@@ -383,6 +383,16 @@ class TestMatrixTypingIndicator:
             timeout=0,
         )
 
+    @pytest.mark.asyncio
+    async def test_stop_typing_no_client_is_noop(self):
+        self.adapter._client = None
+        await self.adapter.stop_typing("!room:example.org")  # should not raise
+
+    @pytest.mark.asyncio
+    async def test_stop_typing_suppresses_exceptions(self):
+        self.adapter._client.set_typing = AsyncMock(side_effect=Exception("network"))
+        await self.adapter.stop_typing("!room:example.org")  # should not raise
+
 
 # ---------------------------------------------------------------------------
 # mxc:// URL conversion
@@ -1200,45 +1210,6 @@ class TestMatrixSyncLoop:
         mock_sync_store.put_next_batch.assert_awaited_once_with("s1234")
 
 
-class TestMediaCacheGate:
-    def test_all_media_types_should_cache(self):
-        """All media types should be cached locally, not just photos/voice/encrypted."""
-        from gateway.platforms.matrix import MessageType
-        for msg_type in [MessageType.PHOTO, MessageType.AUDIO, MessageType.VIDEO, MessageType.DOCUMENT]:
-            should_cache = msg_type in (
-                MessageType.PHOTO, MessageType.AUDIO, MessageType.VIDEO, MessageType.DOCUMENT,
-            )
-            assert should_cache is True, f"{msg_type} should be cached locally"
-
-
-class TestMatrixStopTyping:
-    def setup_method(self):
-        self.adapter = _make_adapter()
-        self.adapter._client = None
-
-    @pytest.mark.asyncio
-    async def test_stop_typing_calls_set_typing_with_zero_timeout(self):
-        mock_client = MagicMock()
-        mock_client.set_typing = AsyncMock()
-        self.adapter._client = mock_client
-        await self.adapter.stop_typing("!room:example.org")
-        mock_client.set_typing.assert_awaited_once()
-        call_kwargs = mock_client.set_typing.await_args
-        assert call_kwargs.kwargs.get("timeout") == 0 or call_kwargs.args[-1] == 0
-
-    @pytest.mark.asyncio
-    async def test_stop_typing_no_client_is_noop(self):
-        self.adapter._client = None
-        await self.adapter.stop_typing("!room:example.org")  # should not raise
-
-    @pytest.mark.asyncio
-    async def test_stop_typing_suppresses_exceptions(self):
-        mock_client = MagicMock()
-        mock_client.set_typing = AsyncMock(side_effect=Exception("network"))
-        self.adapter._client = mock_client
-        await self.adapter.stop_typing("!room:example.org")  # should not raise
-
-
 class TestMatrixUploadAndSend:
     @pytest.mark.asyncio
     async def test_upload_unencrypted_room_uses_plain_url(self):
@@ -1333,93 +1304,6 @@ class TestJoinedRoomsReference:
         import asyncio
         rooms = asyncio.get_event_loop().run_until_complete(store.find_shared_rooms("@user:ex"))
         assert set(rooms) == {"!room1:example.org", "!room2:example.org"}
-
-
-# ---------------------------------------------------------------------------
-# E2EE: MegolmEvent key request + buffering via _on_encrypted_event
-# ---------------------------------------------------------------------------
-
-class TestMatrixMegolmEventHandling:
-    pass  # _on_encrypted_event removed — DecryptionDispatcher handles decryption
-
-
-# ---------------------------------------------------------------------------
-# E2EE: Retry pending decryptions
-# ---------------------------------------------------------------------------
-
-class TestMatrixRetryPendingDecryptions:
-    @pytest.mark.asyncio
-    async def test_successful_decryption_routes_to_handler(self):
-        adapter = _make_adapter()
-        adapter._user_id = "@bot:example.org"
-        adapter._startup_ts = 0.0
-        adapter._dm_rooms = {}
-
-        fake_encrypted = MagicMock()
-        fake_encrypted.event_id = "$encrypted"
-
-        decrypted_event = MagicMock()
-
-        mock_crypto = MagicMock()
-        mock_crypto.decrypt_megolm_event = AsyncMock(return_value=decrypted_event)
-
-        fake_client = MagicMock()
-        fake_client.crypto = mock_crypto
-        adapter._client = fake_client
-
-        now = time.time()
-        adapter._pending_megolm = [("!room:ex.org", fake_encrypted, now)]
-
-        with patch.object(adapter, "_on_room_message", AsyncMock()) as mock_handler:
-            await adapter._retry_pending_decryptions()
-            mock_handler.assert_awaited_once_with(decrypted_event)
-
-        # Buffer should be empty now
-        assert len(adapter._pending_megolm) == 0
-
-    @pytest.mark.asyncio
-    async def test_still_undecryptable_stays_in_buffer(self):
-        adapter = _make_adapter()
-
-        fake_encrypted = MagicMock()
-        fake_encrypted.event_id = "$still_encrypted"
-
-        mock_crypto = MagicMock()
-        mock_crypto.decrypt_megolm_event = AsyncMock(side_effect=Exception("missing key"))
-
-        fake_client = MagicMock()
-        fake_client.crypto = mock_crypto
-        adapter._client = fake_client
-
-        now = time.time()
-        adapter._pending_megolm = [("!room:ex.org", fake_encrypted, now)]
-
-        await adapter._retry_pending_decryptions()
-
-        assert len(adapter._pending_megolm) == 1
-
-    @pytest.mark.asyncio
-    async def test_expired_events_dropped(self):
-        adapter = _make_adapter()
-
-        from gateway.platforms.matrix import _PENDING_EVENT_TTL
-
-        fake_event = MagicMock()
-        fake_event.event_id = "$old_event"
-
-        mock_crypto = MagicMock()
-        fake_client = MagicMock()
-        fake_client.crypto = mock_crypto
-        adapter._client = fake_client
-
-        # Timestamp well past TTL
-        old_ts = time.time() - _PENDING_EVENT_TTL - 60
-        adapter._pending_megolm = [("!room:ex.org", fake_event, old_ts)]
-
-        await adapter._retry_pending_decryptions()
-
-        # Should have been dropped
-        assert len(adapter._pending_megolm) == 0
 
 
 # ---------------------------------------------------------------------------
