@@ -2,6 +2,8 @@
 
 A fork of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) — an autonomous AI agent framework powered by Hermes models with tool-use and function-calling capabilities.
 
+> **Personal fork** — I'm using this to experiment with local LLM agents via Ollama. Main changes from upstream: lower default temperature, increased max iterations.
+
 ## Features
 
 - 🤖 **Hermes Model Integration** — Optimized for NousResearch Hermes series models
@@ -43,8 +45,8 @@ OPENAI_API_KEY=your_api_key_here
 MODEL_NAME=NousResearch/Hermes-3-Llama-3.1-8B
 
 # Agent Settings
-MAX_ITERATIONS=10
-TEMPERATURE=0.7
+MAX_ITERATIONS=20
+TEMPERATURE=0.3
 ```
 
 ### Running the Agent
@@ -72,7 +74,7 @@ from hermes_agent.tools import WebSearchTool, CodeExecutionTool
 agent = HermesAgent(
     model="NousResearch/Hermes-3-Llama-3.1-8B",
     tools=[WebSearchTool(), CodeExecutionTool()],
-    max_iterations=10,
+    max_iterations=20,
 )
 
 result = agent.run("Research the latest developments in quantum computing and summarize them.")
