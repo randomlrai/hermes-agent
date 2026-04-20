@@ -40,14 +40,16 @@ Copy `.env.example` to `.env` and configure the following key variables:
 
 ```env
 # Model / API Configuration
-OPENAI_API_BASE=http://localhost:8000/v1
-OPENAI_API_KEY=your_api_key_here
+OPENAI_API_BASE=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
 MODEL_NAME=NousResearch/Hermes-3-Llama-3.1-8B
 
 # Agent Settings
 MAX_ITERATIONS=20
 TEMPERATURE=0.3
 ```
+
+> **Note:** The defaults above are set for local Ollama usage. If using vLLM or OpenAI, update `OPENAI_API_BASE` and `OPENAI_API_KEY` accordingly.
 
 ### Running the Agent
 
@@ -112,5 +114,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgements
 
-- [NousResearch](https://nousresearch.com/) for the original Hermes agent and model series
-- The open-source LLM community
+- [NousResearch](https://nousresearch.com/)
