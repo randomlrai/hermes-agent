@@ -51,6 +51,8 @@ TEMPERATURE=0.3
 
 > **Note:** The defaults above are set for local Ollama usage. If using vLLM or OpenAI, update `OPENAI_API_BASE` and `OPENAI_API_KEY` accordingly.
 
+> **Tip (personal note):** When running `hermes3:8b` via Ollama, I've found that pulling the model first with `ollama pull hermes3:8b` before starting the agent avoids a timeout on the first request.
+
 ### Running the Agent
 
 ```bash
@@ -106,12 +108,4 @@ hermes-agent/
 3. Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/)
 4. Push and open a Pull Request
 
-Please check existing [issues](../../issues) before opening a new one. Use the provided issue templates.
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
-## Acknowledgements
-
-- [NousResearch](https://nousresearch.com/)
+Please check existing [issues](../../issues) before opening a new one. Use the provided issue 
