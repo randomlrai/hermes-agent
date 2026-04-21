@@ -42,7 +42,7 @@ Copy `.env.example` to `.env` and configure the following key variables:
 # Model / API Configuration
 OPENAI_API_BASE=http://localhost:11434/v1
 OPENAI_API_KEY=ollama
-MODEL_NAME=NousResearch/Hermes-3-Llama-3.1-8B
+MODEL_NAME=hermes3:8b
 
 # Agent Settings
 MAX_ITERATIONS=20
@@ -76,7 +76,7 @@ from hermes_agent import HermesAgent
 from hermes_agent.tools import WebSearchTool, CodeExecutionTool
 
 agent = HermesAgent(
-    model="NousResearch/Hermes-3-Llama-3.1-8B",
+    model="hermes3:8b",
     tools=[WebSearchTool(), CodeExecutionTool()],
     max_iterations=20,
 )
@@ -105,7 +105,4 @@ hermes-agent/
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feat/my-feature`)
-3. Commit your changes following [Conventional Commits](https://www.conventionalcommits.org/)
-4. Push and open a Pull Request
-
-Please check existing [issues](../../issues) before opening a new one. Use the provided issue 
+3. Commit your chang
