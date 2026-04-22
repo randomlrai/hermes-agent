@@ -47,6 +47,10 @@ MODEL_NAME=hermes3:8b
 # Agent Settings
 MAX_ITERATIONS=20
 TEMPERATURE=0.3
+
+# Request timeout in seconds — increased from upstream default of 30
+# Needed when running larger models locally that take longer to load
+REQUEST_TIMEOUT=120
 ```
 
 > **Note:** The defaults above are set for local Ollama usage. If using vLLM or OpenAI, update `OPENAI_API_BASE` and `OPENAI_API_KEY` accordingly.
